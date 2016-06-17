@@ -1,0 +1,490 @@
+<#@ import namespace="System.Data.SqlClient" 
+
+
+#>
+
+<#
+
+string SQLConn=@"Data Source=(local)\SQL2016;Integrated Security=SSPI;Initial Catalog=AdventureWorks2014";
+string EPPlus =@"C:\Project\epplus\EPPlus\bin\Release\EpPlus.dll";
+
+var ExportFileList = new List<ExportFile>();
+{
+    
+    var  ExportFile = new ExportFile(@"C:\Temp\test.xls","EXPORT"); 
+    ExportFileList.Add(ExportFile);
+    var  CustomerSheet = new WorkSheet(@"Customers",@"select top(10) * from Sales.Customer",SQLConn);
+    
+    ExportFile.WorkSheetList.Add(CustomerSheet);
+    
+    var  SOHSheet = new WorkSheet(@"Sales Order Header",@"select top(10) * from Sales.SalesOrderHeader",SQLConn);
+    
+    ExportFile.WorkSheetList.Add(SOHSheet);
+    
+    var  SODSheet = new WorkSheet(@"Sale Order Detail",@"select top(10) * from Sales.SalesOrderDetail",SQLConn);
+    
+    ExportFile.WorkSheetList.Add(SODSheet);
+    
+    ExportFile = new ExportFile(@"C:\Temp\test2.xls","EXPORT2"); 
+    ExportFileList.Add(ExportFile);
+    var  CurrencySheet = new WorkSheet(@"Currency",@"select top(10) * from sales.Currency",SQLConn);
+    
+    ExportFile.WorkSheetList.Add(CurrencySheet);
+    
+}
+
+
+#>
+<Biml xmlns="http://schemas.varigence.com/biml.xsd">
+    <ScriptProjects>
+<#
+      foreach(ExportFile FileOn in ExportFileList){
+        string   FileName =FileOn.FileName;
+        string   ProcessName = FileOn.ProcessName;
+        string   stripProcessName = FileOn.ProcessName.Replace(" ","");
+
+#>
+        <ScriptComponentProject ProjectCoreName="sc_<#=stripProcessName#>.csproj" Name="<#=stripProcessName#>Script">
+            <AssemblyReferences>
+                <AssemblyReference AssemblyPath="Microsoft.SqlServer.DTSPipelineWrap" />
+                <AssemblyReference AssemblyPath="Microsoft.SqlServer.DTSRuntimeWrap" />
+                <AssemblyReference AssemblyPath="Microsoft.SqlServer.PipelineHost" />
+                <AssemblyReference AssemblyPath="Microsoft.SqlServer.TxScript" />
+                <AssemblyReference AssemblyPath="System.dll" />
+                <AssemblyReference AssemblyPath="System.AddIn.dll" />
+                <AssemblyReference AssemblyPath="System.Data.dll" />
+                <AssemblyReference AssemblyPath="System.Xml.dll" />
+                <AssemblyReference AssemblyPath="<#=EPPlus#>" />   
+            </AssemblyReferences>
+            <Files>
+                <File Path="AssemblyInfo.cs">
+                    using System.Reflection;
+                    using System.Runtime.CompilerServices;
+                    [assembly: AssemblyTitle("SC_<#=stripProcessName#>.csproj")]
+                    [assembly: AssemblyDescription("")]
+                    [assembly: AssemblyConfiguration("")]
+                    [assembly: AssemblyCompany("")]
+                    [assembly: AssemblyProduct("SC_<#=stripProcessName#>.csproj")]
+                    [assembly: AssemblyCopyright("")]
+                    [assembly: AssemblyTrademark("")]
+                    [assembly: AssemblyCulture("")]
+                    [assembly: AssemblyVersion("1.0.*")]
+                </File>
+                <File Path="ScriptMain.cs">
+                    #region Namespaces
+                    using System;
+                    using System.Data;
+                    using Microsoft.SqlServer.Dts.Pipeline.Wrapper;
+                    using Microsoft.SqlServer.Dts.Runtime.Wrapper;
+                    using Microsoft.SqlServer.Dts.Runtime;
+                    using System.Security.Cryptography;
+                    using System.Text;
+                    using System.IO;
+                    using OfficeOpenXml;
+                    using OfficeOpenXml.Style;
+                    #endregion
+            
+            
+                    [Microsoft.SqlServer.Dts.Pipeline.SSISScriptComponentEntryPointAttribute]
+                    public class ScriptMain : UserComponent
+                    {
+                    
+                        public ExcelPackage package;
+<#
+                        foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                            string stripSheetName = SheetOn.SheetName.Replace(" ","");
+                            string SheetName= SheetOn.SheetName;
+#>
+                            public ExcelWorksheet <#=stripSheetName#>worksheet;
+                            public int <#=stripSheetName#>row_index = 2;
+                
+<#
+                        }
+
+#>
+                
+                        public override void PreExecute()
+                        {
+                            base.PreExecute();
+                                                    
+                            FileInfo newFile = new FileInfo(Variables.OutputExcelFile);
+                            package = new ExcelPackage(newFile);
+<#                    
+                            foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                                string stripSheetName = SheetOn.SheetName.Replace(" ","");
+                                string SheetName= SheetOn.SheetName;
+#>
+                                <#=stripSheetName#>worksheet = package.Workbook.Worksheets.Add("<#=SheetName#>");
+<#
+                                int col = 1;
+                                foreach(MetaDataColumn ColOn in SheetOn.MetaData){
+                                    String ColName = ColOn.Name;
+                                    String ColNumStr = col.ToString();
+#>
+                                    <#=stripSheetName#>worksheet.Cells[1, <#=ColNumStr#>].Value= "<#=ColName#>";
+<#
+                                    col++;
+                                }
+                            }    
+#>
+                        }// End of pre Execute
+                        
+                        public override void PostExecute()
+                        {
+                                                   
+                            package.Save();
+                            base.PostExecute();
+                            int TotRows=0;                                              
+<#
+                            foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                                string stripSheetName = SheetOn.SheetName.Replace(" ","");
+                                string SheetName= SheetOn.SheetName;
+
+#>
+                                TotRows+=<#=stripSheetName#>row_index-2;
+                
+<#
+                            }
+
+#>
+                            this.ComponentMetaData.IncrementPipelinePerfCounter(103 /*DTS_PIPELINE_CTR_ROWSWRITTEN*/,(uint)TotRows);
+                                                                
+
+                        }  // End of post Execute
+                                                
+                                                
+                        public override void  Input0_ProcessInputRow(Input0Buffer Row)
+                        {
+                            string SheetIn = Row.<#=stripProcessName#>TargetSheet.ToString();
+                            switch(SheetIn){
+                                                    
+<#
+                                foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                                    String StripSheetName = SheetOn.SheetName.Replace(" ","");
+                                    String SheetName = SheetOn.SheetName;
+
+#>  
+                                    case "<#=SheetName#>":
+                            
+<#
+                                        int col = 1;
+                                        foreach(MetaDataColumn ColOn in SheetOn.MetaData){
+                                            String ColName = ColOn.Name.Replace(" ","");
+                                            ColName= ColName.Replace("%","");
+                                            
+                                            String ColNumStr = col.ToString();
+                                            // If you get BIML compile errors here , probably due to the input columns not being set..  This is probably due to the DataType not being recognized
+#>
+                                            if(!Row.<#=StripSheetName#><#=ColName#>_IsNull)<#=StripSheetName#>worksheet.Cells[<#=StripSheetName#>row_index, <#=ColNumStr#>].Value= Row.<#=StripSheetName#><#=ColName#>.ToString();
+<#
+                                            col++;
+                                        }
+#>
+                                        <#=StripSheetName#>row_index++;
+                                        break;
+                                
+<#
+                                }
+#>
+                            
+                            } // End of switch
+                        }   // End Of process Input
+                    }
+                </File>
+            </Files>
+            <ReadOnlyVariables>
+                <Variable Namespace="$Project" VariableName="OutputExcelFile" DataType="String" />
+            </ReadOnlyVariables>
+            <InputBuffer Name="Input0">
+                <Columns>
+                   <Column Name="$$<#=ProcessName#>TargetSheet" DataType="String" Length="30" UsageType="ReadOnly"></Column>
+<#
+                    foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                        String StripSheetName = SheetOn.SheetName.Replace(" ","");
+                        String SheetName = SheetOn.SheetName;
+                        String SQLStmt = SheetOn.SQLCall;
+
+                        foreach(MetaDataColumn ColOn in SheetOn.MetaData){
+
+                        string ColumnBuild= string.Format("<Column Name=\"$${0}_{1}\" DataType=\"{2}\" Length=\"{3}\"  Scale=\"{4}\" Precision=\"{5}\" UsageType=\"ReadOnly\"></Column>"
+                            ,SheetName,ColOn.Name,ColOn.BIMLType,ColOn.Len,ColOn.Scale,ColOn.Precision);
+#>
+                        <#=ColumnBuild#>
+                
+<#
+                        }
+                    }
+    
+#>
+                </Columns>
+            </InputBuffer>
+        </ScriptComponentProject>
+<#
+    }
+    
+    
+#>
+    </ScriptProjects>             
+    <Projects>
+        <PackageProject Name="Script1">
+          <Parameters>
+            <Parameter Name="OutputExcelFile" DataType="String">C:\MyTest.XLSX</Parameter>
+          </Parameters>
+          <Packages>
+    
+<#
+    foreach(ExportFile FileOn in ExportFileList){
+        string ProcessName = FileOn.ProcessName;
+#>          
+            <Package PackageName="<#=ProcessName#>" />
+<#
+    }
+#>
+          </Packages>
+        </PackageProject>
+
+    </Projects>
+
+    <Connections>
+        <OleDbConnection Name="SQLServer" ConnectionString="Provider=SQLNCLI11;<#=SQLConn#>" CreateInProject="true"/>
+    </Connections>
+        
+    <Packages>
+<#
+        foreach(ExportFile FileOn in ExportFileList){
+            string ProcessName = FileOn.ProcessName;
+            string stripProcessName = FileOn.ProcessName.Replace(" ","");
+
+#>
+            <Package ConstraintMode="Linear" Name="<#=ProcessName#>"  ProtectionLevel="EncryptSensitiveWithUserKey">
+                <Variables>
+                </Variables>
+                <Connections>
+                    <Connection ConnectionName="SQLServer"/>
+                </Connections>    
+                <Tasks>
+                    <FileSystem Name = "Delete Existing File" Operation ="DeleteFile">
+                       <VariableInput VariableName="Script1.OutputExcelFile" />
+                    </FileSystem>
+                    <Dataflow Name="DataFlow <#=ProcessName#>">
+                        <Transformations>
+<#
+                            foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                                String StripSheetName = SheetOn.SheetName.Replace(" ","");
+                                String SheetName = SheetOn.SheetName;
+                                String SQLStmt = SheetOn.SQLCall;
+#>
+                                <OleDbSource Name="<#=SheetName#> Source" ConnectionName="SQLServer">
+                                    <DirectInput><#=SQLStmt#></DirectInput>
+                                </OleDbSource>
+                                <DerivedColumns Name="<#=SheetName#> Derived">
+                                    <InputPath OutputPathName="<#=SheetName#> Source.Output" />
+                                    <Columns>
+                                        <Column Name="$$<#=ProcessName#>TargetSheet" DataType="String" Length="100"  >"<#=SheetName#>"</Column>                
+                                    </Columns>
+                                </DerivedColumns>
+
+<#
+                            }
+#>
+                            <UnionAll Name="UnionAll">
+                                <InputPaths>
+<#
+                                foreach(WorkSheet SheetOn in FileOn.WorkSheetList){
+                                    String StripSheetName = SheetOn.SheetName.Replace(" ","");
+                                    String SheetName = SheetOn.SheetName;
+#>                                           
+                                    <InputPath OutputPathName="<#=SheetName#> Derived.Output">
+                                        <Columns>
+<#
+                                        foreach(MetaDataColumn ColOn in SheetOn.MetaData){
+                                            String ColName = ColOn.Name;
+#>
+                                            <Column SourceColumn ="<#=ColName#>" TargetColumn = "$$<#=SheetName#>_<#=ColName#>" />
+<#
+                                        }
+#>
+                                        </Columns>
+                                    </InputPath>
+<#
+                                }
+#>                                                                                           
+                                </InputPaths>
+                            </UnionAll>
+                
+                            <ScriptComponentDestination Name = "<#=ProcessName#> Write">
+                                <InputPath  OutputPathName="UnionAll.Output"></InputPath>
+                                <ScriptComponentProjectReference ScriptComponentProjectName="<#=stripProcessName#>Script" />        
+                                <ReadOnlyVariables>
+                                    <ReadOnlyVariable VariableName="Script1.OutputExcelFile" /> 
+                                </ReadOnlyVariables>
+                    
+                            </ScriptComponentDestination>
+                        
+                        </Transformations>
+                    </Dataflow>
+                </Tasks>
+            </Package>
+<#
+        }
+#>
+    </Packages>
+</Biml>
+
+
+
+
+
+<#+
+
+
+
+class ExportFile
+{
+    public String  FileName;
+    public String  ProcessName;
+    public List<WorkSheet> WorkSheetList;
+
+    public ExportFile(string FileName,string ProcessName){
+    
+        this.FileName      = FileName;
+        this.ProcessName   = ProcessName;
+        this.WorkSheetList = new List<WorkSheet>();
+        
+    }
+      
+    
+}
+
+
+class WorkSheet
+{
+    public String SheetName;
+    public String SQLCall;
+    
+    
+   // public List<OutputColumn> ColumnList;
+    public List<MetaDataColumn> MetaData;
+    
+    public WorkSheet(string SheetName, string SQLCall,string SQLConn){
+        this.SheetName = SheetName;
+        this.SQLCall   = SQLCall;
+        
+     //   this.ColumnList = new List<OutputColumn>();    
+        this.MetaData = new List<MetaDataColumn>();
+        FetchMetaData(SQLConn);
+    }
+      
+      
+    public void FetchMetaData(string connectionString)
+    {
+    //exec sp_describe_first_result_set N'select top(10) * from Sales.Customer'
+        string queryString ="exec sp_describe_first_result_set N'"+this.SQLCall+"'";
+
+
+        using (SqlConnection connection =
+                   new SqlConnection(connectionString))
+        {
+            SqlCommand command =
+                new SqlCommand(queryString, connection);
+            connection.Open();
+
+            SqlDataReader reader = command.ExecuteReader();
+
+            // Call Read before accessing data.
+            while (reader.Read())
+            {
+                MetaDataColumn md = new MetaDataColumn();
+                MetaData.Add(md);
+                md.Name = reader["name"].ToString();
+                md.SystemTypeId = (int)reader["system_type_id"];
+                
+                md.Len = (int)((Int16)reader["max_length"]);
+                md.Precision = (int)((Byte)reader["precision"]);
+                md.Scale = (int)((Byte)reader["scale"]);
+
+                string TypeStr="";
+                switch (md.SystemTypeId){
+                   case 34: TypeStr="Binary";break;
+                    case 35: TypeStr="AnsiString";break;
+                    case 36: TypeStr="Guid";break;
+                    case 40: TypeStr="Date";break;
+                    case 41: TypeStr="Time";break;
+                    case 42: TypeStr="DateTime2";break;
+                    case 43: TypeStr="DateTimeOffset";break;
+                    case 48: TypeStr="Byte";break;
+                    case 52: TypeStr="Int16";break;
+                    case 56: TypeStr="Int32";break;
+                    case 58: TypeStr="DateTime";break;
+                    case 59: TypeStr="Single";break;
+                    case 60: TypeStr="Currency";break;
+                    case 61: TypeStr="DateTime";break;
+                    case 62: TypeStr="Double";break;
+                    case 98: TypeStr="Object";break;
+                    case 99: TypeStr="String";break;
+                    case 104: TypeStr="Boolean";break;
+                    case 106: TypeStr="Decimal";break;
+                    case 108: TypeStr="Decimal";break;
+                    case 122: TypeStr="Currency";break;
+                    case 127: TypeStr="Int64";break;
+                    case 240: TypeStr="Object";break;
+                    case 165: TypeStr="Binary";break;
+                    case 167: TypeStr="AnsiString";break;
+                    case 173: TypeStr="Binary";break;
+                    case 175: TypeStr="AnsiStringFixedLength";break;
+                    case 189: TypeStr="Binary";break;
+                    case 231: TypeStr="String";break;
+                    case 239: TypeStr="StringFixedLength";break;
+                    case 241: TypeStr="Xml";break;
+                }
+                
+                md.BIMLType = TypeStr;
+            }
+
+            // Call Close when done reading.
+            reader.Close();
+        }
+    }
+    
+}
+
+class MetaDataColumn
+{
+    public String Name;
+    public int    SystemTypeId;
+    public int    Len;
+    public int    Precision;
+    public int    Scale;
+    public String BIMLType;
+    
+    
+}
+
+class OutputColumn
+{
+    
+    public String SQLColumn;
+    public String SheetColumn;
+    public String Type;
+    public int Scale;
+    public int Precision;
+    public int Length;
+    public OutputColumn(string SheetColumn="",string SQLColumn="",string Type="AnsiString",int Precision=0,int Scale=0,int Length=0){
+        
+        this.SQLColumn = SQLColumn;
+        this.SheetColumn = SheetColumn;
+        if(SheetColumn==""){
+            this.SheetColumn = SQLColumn;
+        }
+        this.Type = Type;
+        this.Scale = Scale;
+        this.Precision = Precision;
+        this.Length = Length;
+        
+    }
+    
+}
+
+
+
+#>
